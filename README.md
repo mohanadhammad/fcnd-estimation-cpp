@@ -240,3 +240,212 @@ For this project, you will need to submit:
 ## Authors ##
 
 Thanks to Fotokite for the initial development of the project code and simulator.
+
+## Project Rubrics
+
+1. Determine the standard deviation of the measurement noise of both GPS X data and Accelerometer X data.
+
+To calculate the standard deviation we draw many samples from GPS and Accelerometer measurement while standstill/hovering and use these methods to calculate the mean and variance:
+
+$$
+\mu = \frac{1}{N} \sum_{i=0}^N X_i
+$$
+
+$$
+\sigma^2 = \frac{1}{N} \sum_{i=0}^N (X_i - \mu)^2
+$$
+
+Such that $N$ is the number of samples, $X_i$ is the measured sample.
+
+I have implemented these equations in a python script [here](scripts/calculate_stdv.py) to parse the log files and calculate the mean and variance from samples of measurements:
+
+The values are:
+
+|Sensor| Standard Deviation Value (m)|
+|-----|-------|
+|MeasuredStdDev_GPSPosXY|0.6313240995863614|
+|MeasuredStdDev_AccelXY|0.4976189179313462|
+
+![sensor_noise](images/sensor_noise.png)
+
+2. Implement a better rate gyro attitude integration scheme in the UpdateFromIMU() function.
+
+```cpp
+void QuadEstimatorEKF::UpdateFromIMU(V3F accel, V3F gyro)
+{
+    bool useQuaternions = true;
+
+    float predictedRoll;
+    float predictedPitch;
+
+    if (!useQuaternions)
+    {
+        float cosTheta = std::cos(pitchEst);
+        float tanTheta = std::tan(pitchEst);
+        float sinPhi = std::sin(rollEst);
+        float cosPhi = std::cos(rollEst);
+
+        float phiD = gyro.x + (sinPhi * tanTheta * gyro.y) + (cosPhi * tanTheta * gyro.z);
+        float thetaD = (cosPhi * gyro.y) - (sinPhi * gyro.z);
+        float psiD = (sinPhi / cosTheta) * gyro.y + (cosPhi / cosTheta) * gyro.z;
+
+        predictedRoll = rollEst + dtIMU * phiD;
+        predictedPitch = pitchEst + dtIMU * thetaD;
+        ekfState(6) = ekfState(6) + dtIMU * psiD;	// yaw
+    }
+    else
+    {
+        Quaternion<float> quat = Quaternion<float>::FromEuler123_RPY(rollEst, pitchEst, ekfState(6));
+        quat.IntegrateBodyRate(gyro, dtIMU);
+
+        predictedRoll = quat.Roll();
+        predictedPitch = quat.Pitch();
+        ekfState(6) = quat.Yaw();
+    }
+
+    // normalize yaw to -pi .. pi
+    if (ekfState(6) > F_PI) ekfState(6) -= 2.f*F_PI;
+    if (ekfState(6) < -F_PI) ekfState(6) += 2.f*F_PI;
+
+
+    // CALCULATE UPDATE
+    accelRoll = atan2f(accel.y, accel.z);
+    accelPitch = atan2f(-accel.x, 9.81f);
+
+    // FUSE INTEGRATION AND UPDATE
+    rollEst = attitudeTau / (attitudeTau + dtIMU) * (predictedRoll)+dtIMU / (attitudeTau + dtIMU) * accelRoll;
+    pitchEst = attitudeTau / (attitudeTau + dtIMU) * (predictedPitch)+dtIMU / (attitudeTau + dtIMU) * accelPitch;
+
+    lastGyro = gyro;
+}
+```
+
+3. Implement all of the elements of the prediction step for the estimator.
+
+```cpp
+VectorXf QuadEstimatorEKF::PredictState(VectorXf curState, float dt, V3F accel, V3F gyro)
+{
+    assert(curState.size() == QUAD_EKF_NUM_STATES);
+    VectorXf predictedState = curState;
+
+    Quaternion<float> attitude = Quaternion<float>::FromEuler123_RPY(rollEst, pitchEst, curState(6));
+
+    // convert acceleration from body to inertial frame
+    V3F IAccel = attitude.Rotate_BtoI(accel) - V3F(0.0F, 0.0F, static_cast<float>(CONST_GRAVITY));
+
+    predictedState(0) += predictedState(3) * dt; // state x
+    predictedState(1) += predictedState(4) * dt; // state y
+    predictedState(2) += predictedState(5) * dt; // state z
+
+    predictedState(3) += IAccel.x * dt;
+    predictedState(4) += IAccel.y * dt;
+    predictedState(5) += IAccel.z * dt;
+
+    // state yaw is already integrated in UpdateFromIMU() method
+
+    return predictedState;
+}
+
+MatrixXf QuadEstimatorEKF::GetRbgPrime(float roll, float pitch, float yaw)
+{
+    // first, figure out the Rbg_prime
+    MatrixXf RbgPrime(3, 3);
+    RbgPrime.setZero();
+
+    float sinPhi = std::sin(roll);
+    float cosPhi = std::cos(roll);
+    float sinTheta = std::sin(pitch);
+    float cosTheta = std::cos(pitch);
+    float sinPsi = std::sin(yaw);
+    float cosPsi = std::cos(yaw);
+
+    RbgPrime(0, 0) = -cosTheta*sinPsi;
+    RbgPrime(0, 1) = -sinPhi*sinTheta*sinPsi - cosPhi*cosPsi;
+    RbgPrime(0, 2) = -cosPhi*sinTheta*sinPsi + sinPhi*cosPsi;
+
+    RbgPrime(1, 0) = cosTheta*cosPsi;
+    RbgPrime(1, 1) = sinPhi*sinTheta*cosPsi - cosPhi*sinPsi;
+    RbgPrime(1, 2) = cosPhi*sinTheta*cosPsi + sinPhi*sinPsi;
+
+    return RbgPrime;
+}
+
+void QuadEstimatorEKF::Predict(float dt, V3F accel, V3F gyro)
+{
+    // predict the state forward
+    VectorXf newState = PredictState(ekfState, dt, accel, gyro);
+
+    // we'll want the partial derivative of the Rbg matrix
+    MatrixXf RbgPrime = GetRbgPrime(rollEst, pitchEst, ekfState(6));
+
+    // we've created an empty Jacobian for you, currently simply set to identity
+    MatrixXf gPrime(QUAD_EKF_NUM_STATES, QUAD_EKF_NUM_STATES);
+    gPrime.setIdentity();
+
+    gPrime(0, 3) = gPrime(1, 4) = gPrime(2, 5) = dt;
+
+    VectorXf a(3, 1);
+    a(0) = accel.x;
+    a(1) = accel.y;
+    a(2) = accel.z;
+
+    MatrixXf A(3, 3);
+    A = RbgPrime * a;
+    gPrime.block(3, 6, 3, 1) = A * dt;
+
+    ekfCov = gPrime * ekfCov * gPrime.transpose() + Q;
+
+    ekfState = newState;
+}
+
+```
+
+4. Implement the magnetometer update.
+
+```cpp
+void QuadEstimatorEKF::UpdateFromMag(float magYaw)
+{
+    VectorXf z(1), zFromX(1);
+    z(0) = magYaw;
+
+    MatrixXf hPrime(1, QUAD_EKF_NUM_STATES);
+    hPrime.setZero();
+
+    hPrime(0, 6) = 1.0F;
+
+    zFromX(0) = ekfState(6);
+
+    Update(z, hPrime, R_Mag, zFromX);
+}
+```
+
+5. Implement the GPS update.
+
+```cpp
+void QuadEstimatorEKF::UpdateFromGPS(V3F pos, V3F vel)
+{
+    VectorXf z(6), zFromX(6);
+    z(0) = pos.x;
+    z(1) = pos.y;
+    z(2) = pos.z;
+    z(3) = vel.x;
+    z(4) = vel.y;
+    z(5) = vel.z;
+
+    MatrixXf hPrime(6, QUAD_EKF_NUM_STATES);
+    hPrime.setZero();
+
+    hPrime.topLeftCorner(6, 6) = MatrixXf::Identity(6, 6);
+
+    // predicted observation from current predicted state
+    zFromX = ekfState.block(0, 0, 6, 1);
+
+    Update(z, hPrime, R_GPS, zFromX);
+}
+```
+
+6. Contoller Tuned Parameters in [ControlParam](config/QuadControlParams.txt)
+
+7. Final Result:
+
+![final_result](images/final_result.png)
