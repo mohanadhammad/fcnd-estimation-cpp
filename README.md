@@ -263,8 +263,13 @@ The values are:
 
 |Sensor| Standard Deviation Value (m)|
 |-----|-------|
-|MeasuredStdDev_GPSPosXY|0.6313240995863614|
-|MeasuredStdDev_AccelXY|0.4976189179313462|
+|MeasuredStdDev_GPSPosXY|0.7070131033192276|
+|MeasuredStdDev_AccelXY|0.501330533995847|
+
+```terminal
+PASS: ABS(Quad.GPS.X-Quad.Pos.X) was less than MeasuredStdDev_GPSPosXY for 70% of the time
+PASS: ABS(Quad.IMU.AX-0.000000) was less than MeasuredStdDev_AccelXY for 69% of the time
+```
 
 ![sensor_noise](images/sensor_noise.png)
 
@@ -419,6 +424,12 @@ void QuadEstimatorEKF::UpdateFromMag(float magYaw)
 }
 ```
 
+```console
+Simulation #1 (../config/10_MagUpdate.txt)
+PASS: ABS(Quad.Est.E.Yaw) was less than 0.120000 for at least 10.000000 seconds
+PASS: ABS(Quad.Est.E.Yaw-0.000000) was less than Quad.Est.S.Yaw for 65% of the time
+```
+
 5. Implement the GPS update.
 
 ```cpp
@@ -442,6 +453,12 @@ void QuadEstimatorEKF::UpdateFromGPS(V3F pos, V3F vel)
 
     Update(z, hPrime, R_GPS, zFromX);
 }
+```
+
+```console
+Simulation #2 (../config/11_GPSUpdate.txt)
+PASS: ABS(Quad.Est.E.Pos) was less than 1.000000 for at least 20.000000 seconds
+
 ```
 
 6. Contoller Tuned Parameters in [ControlParam](config/QuadControlParams.txt)
