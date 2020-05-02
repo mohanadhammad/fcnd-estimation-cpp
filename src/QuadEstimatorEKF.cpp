@@ -8,6 +8,14 @@ using namespace SLR;
 
 const int QuadEstimatorEKF::QUAD_EKF_NUM_STATES;
 
+double normalizeAngle(double x)
+{
+    x = fmodf(x + M_PI, 2 * M_PI);
+    if (x < 0)
+        x += 2 * M_PI;
+    return x - M_PI;
+}
+
 QuadEstimatorEKF::QuadEstimatorEKF(string config, string name)
     : BaseQuadEstimator(config),
       Q(QUAD_EKF_NUM_STATES, QUAD_EKF_NUM_STATES),
@@ -124,8 +132,8 @@ void QuadEstimatorEKF::UpdateFromIMU(V3F accel, V3F gyro)
     }
 
     // normalize yaw to -pi .. pi
-    if (ekfState(6) > F_PI) ekfState(6) -= 2.f*F_PI;
-    if (ekfState(6) < -F_PI) ekfState(6) += 2.f*F_PI;
+
+    ekfState(6) = normalizeAngle(ekfState(6));
 
     /////////////////////////////// END STUDENT CODE ////////////////////////////
 
@@ -332,6 +340,10 @@ void QuadEstimatorEKF::UpdateFromGPS(V3F pos, V3F vel)
     /////////////////////////////// END STUDENT CODE ////////////////////////////
 
     Update(z, hPrime, R_GPS, zFromX);
+
+    //if (ekfState(6) > F_PI) ekfState(6) -= 2.f*F_PI;
+    //if (ekfState(6) < -F_PI) ekfState(6) += 2.f*F_PI;
+    ekfState(6) = normalizeAngle(ekfState(6));
 }
 
 void QuadEstimatorEKF::UpdateFromMag(float magYaw)
@@ -353,6 +365,17 @@ void QuadEstimatorEKF::UpdateFromMag(float magYaw)
     hPrime(0, 6) = 1.0F;
 
     zFromX(0) = ekfState(6);
+
+    //normalize the difference between the measured and estimated yaw
+    float diff = magYaw - zFromX(0);
+    if ( diff > F_PI )
+    {
+      zFromX(0) += 2.f*F_PI;
+    }
+    else if ( diff < -F_PI )
+    {
+      zFromX(0) -= 2.f*F_PI;
+    }
 
     /////////////////////////////// END STUDENT CODE ////////////////////////////
 

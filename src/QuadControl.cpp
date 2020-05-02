@@ -310,12 +310,18 @@ V3F QuadControl::LateralPositionControl(V3F posCmd, V3F velCmd, V3F pos, V3F vel
     return accelCmd;
 }
 
-double constrainAngle(double x)
+float constrainAngle(float angle_rad)
 {
-    x = fmodf(x + M_PI, 2 * M_PI);
-    if (x < 0)
-        x += 2 * M_PI;
-    return x - M_PI;
+    if (angle_rad > 0)
+    {
+        angle_rad = fmodf(angle_rad, M_2_PI);
+    }
+    else
+    {
+        angle_rad = fmodf(angle_rad, -M_2_PI);
+    }
+
+    return angle_rad;
 }
 
 // returns desired yaw rate
