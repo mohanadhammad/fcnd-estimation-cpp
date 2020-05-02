@@ -37,5 +37,6 @@ if __name__ == "__main__":
     gpsMean, gpsVar = calcMeanAndVariance(gpsData)
     imuMean, imuVar = calcMeanAndVariance(imuData)
 
-    print(np.sqrt(gpsVar))
-    print(np.sqrt(imuVar))
+    print("np.sqrt(gpsVar) = ", np.sqrt(gpsVar))
+    print("np.sqrt(imuVar) = ", np.sqrt(imuVar))
+
